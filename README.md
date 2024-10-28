@@ -1,235 +1,220 @@
-## Getting started
+# Digital Asset Registry Canister - Deployment and Testing Guide
 
-To get started developing in the browser, click this button:
+This guide provides instructions for deploying and testing the Digital Asset Registry canister on the Internet Computer.
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/dacadeorg/icp-message-board-contract)
+## Table of Contents
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Deployment](#deployment)
+- [Testing](#testing)
+- [API Documentation](#api-documentation)
 
-If you rather want to use GitHub Codespaces, click this button instead:
+## Prerequisites
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/dacadeorg/icp-message-board-contract?quickstart=1)
+Before you begin, ensure you have the following installed:
+- Node.js (v16 or later)
+- DFX (latest version)
+- Git
+- VS Code (recommended) or any preferred IDE
 
-**NOTE**: After `dfx deploy`, when developing in GitHub Codespaces, run `./canister_urls.py` and click the links that are shown there.
+## Installation
 
-If you prefer running VS Code locally and not in the browser, click "Codespaces: ..." or "Gitpod" in the bottom left corner and select "Open in VS Code" in the menu that appears. 
-If prompted, proceed by installing the recommended plugins for VS Code.
-
-To develop fully locally, first install [Docker](https://www.docker.com/get-started/) and [VS Code](https://code.visualstudio.com/) and start them on your machine.
-Next, click the following button to open the dev container locally:
-
-[![Open locally in Dev Containers](https://img.shields.io/static/v1?label=Dev%20Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/dacadeorg/icp-message-board-contract)
-
-## Prerequisities
-
-1. Install `nvm`:
-- `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash`
-
-2. Switch to node v20:
-- `nvm install 20`
-- `nvm use 20`
-
-3. Install build dependencies:
-## For Ubuntu and WSL2
-```
-sudo apt-get install podman
-```
-## For macOS:
-```
-xcode-select --install
-brew install podman
+1. Clone the repository:
+```bash
+git clone https://github.com/Vincent-Omondi/unique-icp-canister.git
+cd digital-asset-registry
 ```
 
-4. Install `dfx`
-- `DFX_VERSION=0.16.1 sh -ci "$(curl -fsSL https://sdk.dfinity.org/install.sh)"`
-
-5. Add `dfx` to PATH:
-- `echo 'export PATH="$PATH:$HOME/bin"' >> "$HOME/.bashrc"`
-
-6. Create a project structure:
-- create `src` dir
-- create `index.ts` in the `src` dir
-- create `tsconfig.json` in the root directory with the next content
+2. Install dependencies:
+```bash
+npm install
 ```
-{
-    "compilerOptions": {
-        "allowSyntheticDefaultImports": true,
-        "strictPropertyInitialization": false,
-        "strict": true,
-        "target": "ES2020",
-        "moduleResolution": "node",
-        "allowJs": true,
-        "outDir": "HACK_BECAUSE_OF_ALLOW_JS"
+
+3. Create a new dfx project:
+```bash
+dfx new digital-asset-registry
+cd digital-asset-registry
+```
+
+4. Replace the generated files with the repository files.
+
+## Deployment
+
+1. Start the local Internet Computer replica:
+```bash
+dfx start --clean --background
+```
+
+2. Deploy the canister locally:
+```bash
+dfx deploy
+```
+
+3. To deploy to the IC mainnet:
+```bash
+dfx deploy --network ic
+```
+
+Note: Make sure you have sufficient cycles in your wallet for mainnet deployment.
+
+## Testing
+
+### Using dfx Command Line
+
+1. Register a new digital asset:
+```bash
+dfx canister call digital_asset_registry register_asset '(
+  record {
+    title = "Sample Digital Art";
+    description = "A beautiful digital artwork";
+    assetType = "IMAGE";
+    creatorId = "creator123";
+    contentHash = "QmX4u5...";
+    metadata = record {
+      fileFormat = "PNG";
+      fileSize = 1024;
+      dimensions = "1920x1080";
+      additionalTags = vec {"art", "digital"};
     }
-}
+  }
+)'
 ```
-- create `dfx.json` with the next content
+
+2. Retrieve an asset:
+```bash
+dfx canister call digital_asset_registry get_asset '(
+  "asset-id-here"
+)'
 ```
+
+3. Transfer an asset:
+```bash
+dfx canister call digital_asset_registry transfer_asset '(
+  "asset-id-here",
+  "new-owner-id",
+  "FULL"
+)'
+```
+
+### Using HTTP Requests
+
+You can also test the canister using HTTP requests. Here are some examples using curl:
+
+1. Register a new asset:
+```bash
+curl -X POST http://localhost:4943/assets \
+-H "Content-Type: application/json" \
+-d '{
+  "title": "Sample Digital Art",
+  "description": "A beautiful digital artwork",
+  "assetType": "IMAGE",
+  "creatorId": "creator123",
+  "contentHash": "QmX4u5...",
+  "metadata": {
+    "fileFormat": "PNG",
+    "fileSize": 1024,
+    "dimensions": "1920x1080",
+    "additionalTags": ["art", "digital"]
+  }
+}'
+```
+
+2. Get asset by ID:
+```bash
+curl http://localhost:4943/assets/[asset-id]
+```
+
+3. Get creator's assets:
+```bash
+curl http://localhost:4943/creators/[creator-id]/assets
+```
+
+4. Transfer asset:
+```bash
+curl -X POST http://localhost:4943/assets/[asset-id]/transfer \
+-H "Content-Type: application/json" \
+-d '{
+  "toId": "new-owner-id",
+  "transferType": "FULL"
+}'
+```
+
+## API Documentation
+
+### Endpoints
+
+#### POST /assets
+Creates a new digital asset registration.
+
+Request body:
+```json
 {
-  "canisters": {
-    "message_board": {
-      "type": "custom",
-      "main": "src/index.ts",
-      "candid": "src/index.did",
-      "candid_gen": "http",
-      "build": "npx azle message_board",
-      "wasm": ".azle/message_board/message_board.wasm",
-      "gzip": true,
-      "metadata": [
-        {
-            "name": "candid:service",
-            "path": "src/index.did"
-        },
-        {
-            "name": "cdk:name",
-            "content": "azle"
-        }
-    ]
-    }
+  "title": string,
+  "description": string,
+  "assetType": "IMAGE" | "AUDIO" | "VIDEO" | "DOCUMENT" | "CODE",
+  "creatorId": string,
+  "contentHash": string,
+  "metadata": {
+    "fileFormat": string,
+    "fileSize": number,
+    "dimensions": string?,
+    "duration": number?,
+    "additionalTags": string[]
   }
 }
 ```
-where `message_board` is the name of the canister. 
 
-6. Create a `package.json` with the next content and run `npm i`:
-```
+#### GET /assets/:id
+Retrieves a specific asset by ID.
+
+#### GET /creators/:creatorId/assets
+Retrieves all assets owned by a specific creator.
+
+#### POST /assets/:id/transfer
+Transfers asset ownership or licenses.
+
+Request body:
+```json
 {
-  "name": "message_board",
-  "version": "0.1.0",
-  "description": "Internet Computer message board application",
-  "dependencies": {
-    "@dfinity/agent": "^0.21.4",
-    "@dfinity/candid": "^0.21.4",
-    "azle": "^0.21.1",
-    "express": "^4.18.2",
-    "uuid": "^9.0.1"
-  },
-  "engines": {
-    "node": "^20"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21"
-  }
-}
-
-```
-
-7. Run a local replica
-- `dfx start --host 127.0.0.1:8000`
-
-#### IMPORTANT NOTE 
-If you make any changes to the `StableBTreeMap` structure like change datatypes for keys or values, changing size of the key or value, you need to restart `dfx` with the `--clean` flag. `StableBTreeMap` is immutable and any changes to it's configuration after it's been initialized are not supported.
-- `dfx start --host 127.0.0.1:8000 --clean`
-
-8. Deploy a canister
-- `dfx deploy`
-Also, if you are building an HTTP-based canister and would like your canister to autoreload on file changes (DO NOT deploy to mainnet with autoreload enabled):
-```
-AZLE_AUTORELOAD=true dfx deploy
-```
-
-9. Stop a local replica
-- `dfx stop`
-
-## Interaction with the canister
-
-When a canister is deployed, `dfx deploy` produces a link to the Candid interface in the shell output.
-
-Candid interface provides a simple UI where you can interact with functions in the canister.
-
-On the other hand, you can interact with the canister using `dfx` via CLI:
-
-### get canister id:
-- `dfx canister id <CANISTER_NAME>`
-Example:
-- `dfx canister id message_board`
-Response:
-```
-bkyz2-fmaaa-aaaaa-qaaaq-cai
-```
-
-Now, the URL of your canister should like this:
-```
-http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000
-```
-
-With this URL, you can interact with the canister using an HTTP client of your choice. We are going to use `curl`.
-
-### create a message:
-- `curl -X POST <CANISTER_URL>/<REQUEST_PATH> -H "Content-type: application/json" -d <PAYLOAD>`
-Example: 
-- `curl -X POST http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000/messages -H "Content-type: application/json" -d '{"title": "todo list", "body": "some important things", "attachmentURL": "url/path/to/some/photo/attachment"}'`
-Response:
-```
-{
-    "id": "d8326ec8-fe70-402e-8914-ca83f0f1055b",
-    "createdAt": "2024-02-09T11:24:32.441Z",
-    "title": "todo list",
-    "body": "some important things",
-    "attachmentURL": "url/path/to/some/photo/attachment"
+  "toId": string,
+  "transferType": "FULL" | "LICENSE"
 }
 ```
 
-### update a message:
-- `curl -X PUT <CANISTER_URL>/<REQUEST_PATH>/<MESSAGE_ID> -H "Content-type: application/json" -d <PAYLOAD>`
-Example (In this case we include a message id in the payload to identify the message we want to update): 
-- `curl -X PUT  http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000/messages/d8326ec8-fe70-402e-8914-ca83f0f1055b -H "Content-type: application/json" -d '{"title": "UPDATED TITLE", "body": "some important things", "attachmentURL": "url/path/to/some/photo/attachment"}'`
-Response:
-```
-{
-    "id": "d8326ec8-fe70-402e-8914-ca83f0f1055b",
-    "createdAt": "2024-02-09T11:24:32.441Z",
-    "title": "UPDATED TITLE",
-    "body": "some important things",
-    "attachmentURL": "url/path/to/some/photo/attachment",
-    "updatedAt": "2024-02-09T11:26:59.002Z"
-}
+#### PUT /assets/:id/metadata
+Updates asset metadata.
+
+#### POST /assets/:id/revoke
+Revokes an asset.
+
+## Error Handling
+
+The canister includes comprehensive error handling. All endpoints return appropriate HTTP status codes:
+- 200: Success
+- 400: Bad Request (with error message)
+- 404: Not Found
+- 500: Internal Server Error
+
+## Security Considerations
+
+1. Always verify content hashes before registration
+2. Implement proper access control in production
+3. Validate all input data
+4. Monitor transfer history for suspicious activity
+
+## Monitoring and Maintenance
+
+1. Check canister status:
+```bash
+dfx canister status digital_asset_registry
 ```
 
-### get all messages:
-- `curl <CANISTER_URL>/<REQUEST_PATH>`
-Example:
-- `curl http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000/messages`
-Response:
-```
-[
-    {
-        "id": "d8326ec8-fe70-402e-8914-ca83f0f1055b",
-        "createdAt": "2024-02-09T11:24:32.441Z",
-        "title": "UPDATED TITLE",
-        "body": "some important things",
-        "attachmentURL": "url/path/to/some/photo/attachment",
-        "updatedAt": "2024-02-09T11:26:59.002Z"
-    }
-]
+2. Update canister:
+```bash
+dfx canister install digital_asset_registry --mode upgrade
 ```
 
-### get a message:
-- `curl <CANISTER_URL>/<REQUEST_PATH>/<MESSAGE_ID>`
-Example (here we only provide a message id):
-- `curl http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000/messages/d8326ec8-fe70-402e-8914-ca83f0f1055b`
-Response:
-```
-{
-    "id": "d8326ec8-fe70-402e-8914-ca83f0f1055b",
-    "createdAt": "2024-02-09T11:24:32.441Z",
-    "title": "UPDATED TITLE",
-    "body": "some important things",
-    "attachmentURL": "url/path/to/some/photo/attachment",
-    "updatedAt": "2024-02-09T11:26:59.002Z"
-}
-```
-
-### delete a message:
-- `curl -X DELETE <CANISTER_URL>/<REQUEST_PATH>/<MESSAGE_ID>`
-Example (here we only provide a message id):
-- `curl -X DELETE http://bkyz2-fmaaa-aaaaa-qaaaq-cai.localhost:8000/messages/d8326ec8-fe70-402e-8914-ca83f0f1055b`
-Response (returns the deleted message):
-```
-{
-    "id": "d8326ec8-fe70-402e-8914-ca83f0f1055b",
-    "createdAt": "2024-02-09T11:24:32.441Z",
-    "title": "UPDATED TITLE",
-    "body": "some important things",
-    "attachmentURL": "url/path/to/some/photo/attachment",
-    "updatedAt": "2024-02-09T11:26:59.002Z"
-}
+3. Monitor cycles:
+```bash
+dfx canister status digital_asset_registry --network ic
 ```
