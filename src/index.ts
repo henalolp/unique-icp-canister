@@ -1,16 +1,14 @@
-// cannister code goes here
 import { v4 as uuidv4 } from 'uuid';
 import { Server, StableBTreeMap, ic, Query, Update } from 'azle';
 import express from 'express';
 
-// Define the main types for our digital asset registry
 class DigitalAsset {
     id: string;
     title: string;
     description: string;
     assetType: AssetType;
     creatorId: string;
-    contentHash: string;  // Hash of the digital content
+    contentHash: string;
     registrationDate: Date;
     lastModified: Date;
     transferHistory: Transfer[];
@@ -53,20 +51,30 @@ class AssetMetadata {
     additionalTags: string[];
 }
 
-// Storage for different aspects of the registry
 const assetStorage = StableBTreeMap<string, DigitalAsset>(0);
-const creatorAssets = StableBTreeMap<string, string[]>(1);  // Creator ID to Asset IDs mapping
+const creatorAssets = StableBTreeMap<string, string[]>(1);
 const assetTransfers = StableBTreeMap<string, Transfer[]>(2);
 
 export default Server(() => {
     const app = express();
     app.use(express.json());
 
+    // Utility for consistent error response
+    function sendErrorResponse(res, status, message) {
+        res.status(status).json({ error: message });
+    }
+
+    // Helper to get current date in correct format
+    function getCurrentDate(): Date {
+        const timestamp = Number(ic.time());
+        return new Date(timestamp / 1_000_000);
+    }
+
     // Register a new digital asset
     app.post("/assets", (req, res) => {
         try {
             validateAssetRegistration(req.body);
-            
+
             const assetId = uuidv4();
             const asset: DigitalAsset = {
                 id: assetId,
@@ -82,20 +90,12 @@ export default Server(() => {
                 metadata: req.body.metadata
             };
 
-            // Store the asset
             assetStorage.insert(assetId, asset);
-
-            // Update creator's asset list
-            const creatorAssetList = creatorAssets.get(req.body.creatorId);
-            if ("None" in creatorAssetList) {
-                creatorAssets.insert(req.body.creatorId, [assetId]);
-            } else {
-                creatorAssets.insert(req.body.creatorId, [...creatorAssetList.Some, assetId]);
-            }
+            updateCreatorAssetsList(req.body.creatorId, assetId);
 
             res.json(asset);
         } catch (error) {
-            res.status(400).json({ error: error.message });
+            sendErrorResponse(res, 400, error.message);
         }
     });
 
@@ -103,10 +103,9 @@ export default Server(() => {
     app.get("/assets/:id", (req, res) => {
         const assetOpt = assetStorage.get(req.params.id);
         if ("None" in assetOpt) {
-            res.status(404).json({ error: "Asset not found" });
-        } else {
-            res.json(assetOpt.Some);
+            return sendErrorResponse(res, 404, "Asset not found");
         }
+        res.json(assetOpt.Some);
     });
 
     // Get all assets by creator ID
@@ -115,15 +114,14 @@ export default Server(() => {
         if ("None" in creatorAssetsOpt) {
             res.json([]);
         } else {
-            const assets = creatorAssetsOpt.Some.map(assetId => {
-                const asset = assetStorage.get(assetId);
-                return "None" in asset ? null : asset.Some;
-            }).filter(asset => asset !== null);
+            const assets = creatorAssetsOpt.Some
+                .map(assetId => assetStorage.get(assetId).Some)
+                .filter(asset => asset !== null);
             res.json(assets);
         }
     });
 
-    // Transfer asset ownership
+    // Transfer asset ownership with ownership check
     app.post("/assets/:id/transfer", (req, res) => {
         try {
             const { toId, transferType } = req.body;
@@ -134,11 +132,13 @@ export default Server(() => {
             }
 
             const asset = assetOpt.Some;
+            if (asset.creatorId !== req.user.id) {  // Assuming req.user.id is authenticated user
+                return sendErrorResponse(res, 403, "Unauthorized transfer attempt");
+            }
             if (asset.status !== AssetStatus.ACTIVE) {
-                throw new Error("Asset is not available for transfer");
+                return sendErrorResponse(res, 400, "Asset is not available for transfer");
             }
 
-            // Create transfer record
             const transfer: Transfer = {
                 id: uuidv4(),
                 fromId: asset.creatorId,
@@ -147,7 +147,6 @@ export default Server(() => {
                 transferType: transferType
             };
 
-            // Update asset
             const updatedAsset = {
                 ...asset,
                 transferHistory: [...asset.transferHistory, transfer],
@@ -155,28 +154,14 @@ export default Server(() => {
                 lastModified: getCurrentDate()
             };
 
-            // If full transfer, update creator mappings
             if (transferType === TransferType.FULL) {
-                // Remove from old creator's list
-                const oldCreatorAssets = creatorAssets.get(asset.creatorId).Some;
-                creatorAssets.insert(
-                    asset.creatorId,
-                    oldCreatorAssets.filter(id => id !== asset.id)
-                );
-
-                // Add to new creator's list
-                const newCreatorAssetsOpt = creatorAssets.get(toId);
-                if ("None" in newCreatorAssetsOpt) {
-                    creatorAssets.insert(toId, [asset.id]);
-                } else {
-                    creatorAssets.insert(toId, [...newCreatorAssetsOpt.Some, asset.id]);
-                }
+                updateCreatorAssetsListOnTransfer(asset.creatorId, toId, asset.id);
             }
 
             assetStorage.insert(asset.id, updatedAsset);
             res.json(updatedAsset);
         } catch (error) {
-            res.status(400).json({ error: error.message });
+            sendErrorResponse(res, 400, error.message);
         }
     });
 
@@ -191,21 +176,18 @@ export default Server(() => {
             const asset = assetOpt.Some;
             const updatedAsset = {
                 ...asset,
-                metadata: {
-                    ...asset.metadata,
-                    ...req.body
-                },
+                metadata: { ...asset.metadata, ...req.body },
                 lastModified: getCurrentDate()
             };
 
             assetStorage.insert(asset.id, updatedAsset);
             res.json(updatedAsset);
         } catch (error) {
-            res.status(400).json({ error: error.message });
+            sendErrorResponse(res, 400, error.message);
         }
     });
 
-    // Revoke asset
+    // Revoke asset with ownership check
     app.post("/assets/:id/revoke", (req, res) => {
         try {
             const assetOpt = assetStorage.get(req.params.id);
@@ -214,8 +196,11 @@ export default Server(() => {
             }
 
             const asset = assetOpt.Some;
+            if (asset.creatorId !== req.user.id) {
+                return sendErrorResponse(res, 403, "Unauthorized revocation attempt");
+            }
             if (asset.status === AssetStatus.REVOKED) {
-                throw new Error("Asset is already revoked");
+                return sendErrorResponse(res, 400, "Asset is already revoked");
             }
 
             const updatedAsset = {
@@ -227,18 +212,14 @@ export default Server(() => {
             assetStorage.insert(asset.id, updatedAsset);
             res.json(updatedAsset);
         } catch (error) {
-            res.status(400).json({ error: error.message });
+            sendErrorResponse(res, 400, error.message);
         }
     });
 
     return app.listen();
 });
 
-// Utility Functions
-function getCurrentDate(): Date {
-    const timestamp = new Number(ic.time());
-    return new Date(timestamp.valueOf() / 1000_000);
-}
+// Helper Functions
 
 function validateAssetRegistration(data: any): void {
     if (!data.title || typeof data.title !== 'string') {
@@ -255,5 +236,30 @@ function validateAssetRegistration(data: any): void {
     }
     if (!data.metadata || typeof data.metadata !== 'object') {
         throw new Error("Invalid metadata");
+    }
+    // Sanitize fields as necessary for security
+}
+
+function updateCreatorAssetsList(creatorId: string, assetId: string): void {
+    const creatorAssetList = creatorAssets.get(creatorId);
+    if ("None" in creatorAssetList) {
+        creatorAssets.insert(creatorId, [assetId]);
+    } else {
+        creatorAssets.insert(creatorId, [...creatorAssetList.Some, assetId]);
+    }
+}
+
+function updateCreatorAssetsListOnTransfer(oldCreatorId: string, newCreatorId: string, assetId: string): void {
+    const oldCreatorAssets = creatorAssets.get(oldCreatorId).Some;
+    creatorAssets.insert(
+        oldCreatorId,
+        oldCreatorAssets.filter(id => id !== assetId)
+    );
+
+    const newCreatorAssetsOpt = creatorAssets.get(newCreatorId);
+    if ("None" in newCreatorAssetsOpt) {
+        creatorAssets.insert(newCreatorId, [assetId]);
+    } else {
+        creatorAssets.insert(newCreatorId, [...newCreatorAssetsOpt.Some, assetId]);
     }
 }
